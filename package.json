@@ -27,6 +27,7 @@
     "@vitalets/google-translate-api": "^9.2.0",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "yt-search": "^2.11.0",
+    "javascript-obfuscator": "^5.6.0",
     "adm-zip": "^0.5.10",
     "audio-decode": "^2.2.3",
     "axios": "^1.2.5",
