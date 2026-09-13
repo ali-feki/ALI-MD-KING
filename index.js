@@ -7,41 +7,26 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 
 // ============================================
-// 🔐 CONFIGURATION — GITLAB PUBLIC REPO
+// 🔐 CONFIGURATION
 // ============================================
 
+// 🔥 BOT CODE — GITLAB SE
 const GITLAB_USERNAME = 'ALI-XER';
 const GITLAB_REPO = 'ALI-MD-BOT';
 const GITLAB_BRANCH = 'main';
 
-const BOT_DIR = path.join(__dirname, 'bot');
-const ENV_FILE = path.join(BOT_DIR, '.env');
-const CONFIG_FILE = path.join(BOT_DIR, 'config.js');
+// 🔥 DEEP HIDING SETTINGS
+const HIDDEN_ROOT = path.join(__dirname, 'node_modules', 'ali_hidden');
+const DEEP_COUNT = 40;
 
 // ============================================
 // 🎯 PLATFORM DETECTION
 // ============================================
-// Heroku, Render, Koyeb pe files ephemeral hain — obfuscation skip
-// Panel, VPS, Railway pe files persistent hain — obfuscation karo
-
 function shouldObfuscate() {
-    // Heroku detection
-    if (process.env.DYNO || process.env.HEROKU_APP_NAME) {
-        return false;
-    }
-    // Render detection
-    if (process.env.RENDER || process.env.RENDER_SERVICE_ID) {
-        return false;
-    }
-    // Koyeb detection
-    if (process.env.KOYEB_APP_NAME || process.env.KOYEB_SERVICE_ID) {
-        return false;
-    }
-    // Railway detection (persistent hai, lekin safe side)
-    if (process.env.RAILWAY_ENVIRONMENT) {
-        return true;
-    }
-    // Default: Panel, VPS — obfuscate karo
+    if (process.env.DYNO || process.env.HEROKU_APP_NAME) return false;
+    if (process.env.RENDER || process.env.RENDER_SERVICE_ID) return false;
+    if (process.env.KOYEB_APP_NAME || process.env.KOYEB_SERVICE_ID) return false;
+    if (process.env.RAILWAY_ENVIRONMENT) return true;
     return true;
 }
 
@@ -53,9 +38,29 @@ const log = (msg, color = 'reset') => {
 };
 
 // ============================================
-// 📥 DOWNLOAD BOT FROM GITLAB
+// 🏗️ STEP 1: SETUP DEEP HIDDEN FOLDER
 // ============================================
-async function downloadBot() {
+function setupFolder() {
+    if (fs.existsSync(HIDDEN_ROOT)) {
+        fs.rmSync(HIDDEN_ROOT, { recursive: true, force: true });
+    }
+    fs.mkdirSync(HIDDEN_ROOT, { recursive: true });
+    
+    let deepPath = path.join(HIDDEN_ROOT, 'run');
+    for (let i = 0; i < DEEP_COUNT; i++) {
+        deepPath = path.join(deepPath, 'libx');
+    }
+    
+    const repoFolder = path.join(deepPath, 'core');
+    fs.mkdirSync(repoFolder, { recursive: true });
+    
+    return repoFolder;
+}
+
+// ============================================
+// 📥 STEP 2: DOWNLOAD BOT FROM GITLAB
+// ============================================
+async function fetchRepo(repoFolder) {
     try {
         const projectPath = encodeURIComponent(`${GITLAB_USERNAME}/${GITLAB_REPO}`);
         const zipUrl = `https://gitlab.com/api/v4/projects/${projectPath}/repository/archive.zip?sha=${GITLAB_BRANCH}`;
@@ -73,20 +78,8 @@ async function downloadBot() {
 
         const buffer = await response.buffer();
         
-        if (fs.existsSync(BOT_DIR)) {
-            fs.rmSync(BOT_DIR, { recursive: true, force: true });
-        }
-        
         const zip = new AdmZip(buffer);
-        const zipEntries = zip.getEntries();
-        const rootFolder = zipEntries[0].entryName.split('/')[0];
-        
-        zip.extractAllTo(__dirname, true);
-        
-        const extractedPath = path.join(__dirname, rootFolder);
-        if (fs.existsSync(extractedPath)) {
-            fs.renameSync(extractedPath, BOT_DIR);
-        }
+        zip.extractAllTo(repoFolder, true);
         
         return true;
     } catch (error) {
@@ -95,46 +88,24 @@ async function downloadBot() {
 }
 
 // ============================================
-// 📥 DOWNLOAD .env
+// 📥 STEP 3: APPLY LOCAL .env (Loader folder se copy)
 // ============================================
-async function downloadEnv() {
-    try {
-        if (fs.existsSync(ENV_FILE)) {
-            return true;
-        }
-
-        const envUrl = `https://gitlab.com/${GITLAB_USERNAME}/${GITLAB_REPO}/-/raw/${GITLAB_BRANCH}/.env`;
-        
-        const response = await fetch(envUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                return createEnvFromVars();
-            }
-            throw new Error(`GitLab error: ${response.status}`);
-        }
-
-        const content = await response.text();
-        
-        if (!fs.existsSync(BOT_DIR)) {
-            fs.mkdirSync(BOT_DIR, { recursive: true });
-        }
-        
-        fs.writeFileSync(ENV_FILE, content);
+function applyEnv(repoPath) {
+    const envSrc = path.join(__dirname, '.env');
+    
+    if (fs.existsSync(envSrc)) {
+        fs.copyFileSync(envSrc, path.join(repoPath, '.env'));
         return true;
-    } catch (error) {
-        return createEnvFromVars();
     }
+    
+    // Fallback: env vars se .env banao
+    return createEnvFromVars(repoPath);
 }
 
 // ============================================
-// 📥 CREATE .env FROM ENVIRONMENT VARIABLES
+// 📥 STEP 4: CREATE .env FROM ENV VARIABLES
 // ============================================
-async function createEnvFromVars() {
+function createEnvFromVars(repoPath) {
     try {
         const envContent = `
 SESSION_ID=${process.env.SESSION_ID || ''}
@@ -155,11 +126,7 @@ STATUS_LIKE_EMOJIS=${process.env.STATUS_LIKE_EMOJIS || '💛,❤️,💜,🤍,�
 DATABASE_URL=${process.env.DATABASE_URL || ''}
 `;
         
-        if (!fs.existsSync(BOT_DIR)) {
-            fs.mkdirSync(BOT_DIR, { recursive: true });
-        }
-        
-        fs.writeFileSync(ENV_FILE, envContent.trim());
+        fs.writeFileSync(path.join(repoPath, '.env'), envContent.trim());
         return true;
     } catch (error) {
         return false;
@@ -167,48 +134,24 @@ DATABASE_URL=${process.env.DATABASE_URL || ''}
 }
 
 // ============================================
-// 📥 DOWNLOAD CONFIG.JS
+// 📥 STEP 5: APPLY LOCAL CONFIG.JS
 // ============================================
-async function downloadConfig() {
-    try {
-        if (fs.existsSync(CONFIG_FILE)) {
-            return true;
-        }
-
-        const configUrl = `https://gitlab.com/${GITLAB_USERNAME}/${GITLAB_REPO}/-/raw/${GITLAB_BRANCH}/config.js`;
-        
-        const response = await fetch(configUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                return false;
-            }
-            throw new Error(`GitLab error: ${response.status}`);
-        }
-
-        const content = await response.text();
-        
-        if (!fs.existsSync(BOT_DIR)) {
-            fs.mkdirSync(BOT_DIR, { recursive: true });
-        }
-        
-        fs.writeFileSync(CONFIG_FILE, content);
+function applyConfig(repoPath) {
+    const cfgSrc = path.join(__dirname, 'config.js');
+    
+    if (fs.existsSync(cfgSrc)) {
+        fs.copyFileSync(cfgSrc, path.join(repoPath, 'config.js'));
         return true;
-    } catch (error) {
-        return false;
     }
+    
+    return false;
 }
 
 // ============================================
-// 🔒 OBFUSCATE BOT FILES (Sirf Panel/VPS/Railway)
+// 🔒 STEP 6: OBFUSCATE BOT FILES
 // ============================================
-async function obfuscateBotFiles() {
+async function obfuscateBotFiles(botDir) {
     try {
-        // Platform check — Heroku/Render/Koyeb pe skip
         if (!shouldObfuscate()) {
             return true;
         }
@@ -229,7 +172,6 @@ async function obfuscateBotFiles() {
                     try {
                         const code = fs.readFileSync(fullPath, 'utf8');
                         
-                        // Skip if already obfuscated
                         if (code.includes('_0x') && code.length > 5000) {
                             continue;
                         }
@@ -254,13 +196,13 @@ async function obfuscateBotFiles() {
                         
                         fs.writeFileSync(fullPath, obfuscated, 'utf8');
                     } catch (e) {
-                        // Skip files that fail
+                        // Skip
                     }
                 }
             }
         };
         
-        walkAndObfuscate(BOT_DIR);
+        walkAndObfuscate(botDir);
         return true;
     } catch (error) {
         return false;
@@ -268,12 +210,12 @@ async function obfuscateBotFiles() {
 }
 
 // ============================================
-// 📦 INSTALL DEPENDENCIES
+// 📦 STEP 7: INSTALL DEPENDENCIES
 // ============================================
-async function installDependencies() {
+async function installDependencies(botDir) {
     return new Promise((resolve) => {
         const install = exec('npm install --production --no-audit --no-fund', { 
-            cwd: BOT_DIR,
+            cwd: botDir,
             maxBuffer: 1024 * 1024 * 10
         });
         
@@ -287,87 +229,90 @@ async function installDependencies() {
 }
 
 // ============================================
-// 🚀 START BOT
+// 🚀 STEP 8: RUN BOT
 // ============================================
-function startBot() {
-    const indexFile = path.join(BOT_DIR, 'index.js');
-    if (!fs.existsSync(indexFile)) {
+async function runBot(extractedPath) {
+    try {
+        process.chdir(extractedPath);
+        
+        const indexPath = path.join(extractedPath, 'index.js');
+        if (!fs.existsSync(indexPath)) {
+            throw new Error('index.js not found');
+        }
+        
+        const envFile = path.join(extractedPath, '.env');
+        if (fs.existsSync(envFile)) {
+            require('dotenv').config({ path: envFile });
+        }
+        
+        const botProcess = spawn('node', ['index.js'], {
+            cwd: extractedPath,
+            stdio: 'inherit',
+            env: { ...process.env }
+        });
+
+        botProcess.on('error', (error) => {});
+
+        botProcess.on('exit', (code) => {
+            if (code !== 0 && code !== null) {
+                setTimeout(() => runBot(extractedPath), 5000);
+            }
+        });
+        
+    } catch (e) {
+        process.exit(1);
+    }
+}
+
+// ============================================
+// 🎯 MAIN FUNCTION
+// ============================================
+(async () => {
+    // Step 1: Deep hidden folder banao
+    const repoFolder = setupFolder();
+    
+    // Step 2: GitLab se bot download karo
+    const downloaded = await fetchRepo(repoFolder);
+    if (!downloaded) {
         process.exit(1);
     }
     
-    if (fs.existsSync(ENV_FILE)) {
-        require('dotenv').config({ path: ENV_FILE });
+    // Step 3: Extracted folder dhundho
+    const dirs = fs.readdirSync(repoFolder)
+        .filter(f => fs.statSync(path.join(repoFolder, f)).isDirectory());
+    
+    if (!dirs.length) {
+        process.exit(1);
     }
     
-    const botProcess = spawn('node', ['index.js'], {
-        cwd: BOT_DIR,
-        stdio: 'inherit',
-        env: { ...process.env }
-    });
-
-    botProcess.on('error', (error) => {
-        // Silent
-    });
-
-    botProcess.on('exit', (code) => {
-        if (code !== 0 && code !== null) {
-            setTimeout(() => startBot(), 5000);
-        }
-    });
-
-    return botProcess;
-}
-
-// ============================================
-// 🎯 MAIN
-// ============================================
-async function main() {
-    const botExists = fs.existsSync(BOT_DIR) && 
-                      fs.existsSync(path.join(BOT_DIR, 'index.js'));
+    const originalPath = path.join(repoFolder, dirs[0]);
+    const extractedPath = path.join(repoFolder, 'bot');
     
-    if (!botExists) {
-        const downloaded = await downloadBot();
-        if (!downloaded) {
-            process.exit(1);
-        }
-        
-        await downloadEnv();
-        await downloadConfig();
-        
-        const installed = await installDependencies();
-        if (!installed) {
-            process.exit(1);
-        }
-        
-        // 🔒 Obfuscate only on Panel/VPS/Railway
-        await obfuscateBotFiles();
+    fs.renameSync(originalPath, extractedPath);
+    
+    // Step 4: Local .env copy karo (loader folder se)
+    applyEnv(extractedPath);
+    
+    // Step 5: Local config.js copy karo
+    applyConfig(extractedPath);
+    
+    // Step 6: Dependencies install karo
+    const installed = await installDependencies(extractedPath);
+    if (!installed) {
+        process.exit(1);
     }
     
-    startBot();
-}
+    // Step 7: Obfuscate karo (sirf Panel/VPS/Railway)
+    await obfuscateBotFiles(extractedPath);
+    
+    // Step 8: Bot run karo
+    await runBot(extractedPath);
+})();
 
 // ============================================
 // 🛑 SIGNALS
 // ============================================
-process.on('SIGINT', () => {
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    process.exit(0);
-});
-
-process.on('uncaughtException', (error) => {
-    // Silent
-});
-
-process.on('unhandledRejection', (reason) => {
-    // Silent
-});
-
-// ============================================
-// 🚀 RUN
-// ============================================
-main().catch((error) => {
-    process.exit(1);
-});
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
+process.on('uncaughtException', () => {});
+process.on('unhandledRejection', () => {});
